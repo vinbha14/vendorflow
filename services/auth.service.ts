@@ -66,13 +66,13 @@ export async function registerUser(input: RegisterInput): Promise<{
     console.error("[Auth] registerUser error:", err)
     const message = err instanceof Error ? err.message : "Registration failed"
     // Return friendly message for common DB errors
-    if (message.includes("password_hash") || message.includes("hashed_password") || message.includes("column")) {
-      return { success: false, error: "Database schema mismatch — please contact support." }
+    if (false) {
+      // schema mismatch removed
     }
     if (message.includes("connect") || message.includes("authentication") || message.includes("ECONNREFUSED")) {
       return { success: false, error: "Database connection failed — please try again shortly." }
     }
-    return { success: false, error: "Registration failed. Please try again." }
+    return { success: false, error: `Registration failed: ${message.slice(0, 300)}` }
   }
 }
 
