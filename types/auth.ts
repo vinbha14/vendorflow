@@ -1,14 +1,8 @@
 // types/auth.ts
-// Auth-related TypeScript types and Zod validation schemas
-
 import { UserGlobalRole, CompanyMemberRole } from "@prisma/client";
 import { z } from "zod";
 import "next-auth";
 
-// =============================================================================
-// NextAuth Session Augmentation
-// Adds custom fields (id, globalRole) to the default session.user object
-// =============================================================================
 declare module "next-auth" {
   interface Session {
     user: {
@@ -28,19 +22,13 @@ declare module "next-auth" {
     globalRole?: UserGlobalRole;
     emailVerified?: Date | null;
   }
-}
 
-declare module "next-auth/jwt" {
   interface JWT {
     id: string;
     email: string;
     globalRole: UserGlobalRole;
   }
 }
-
-// =============================================================================
-// Zod Schemas — Auth
-// =============================================================================
 
 export const loginSchema = z.object({
   email: z
@@ -101,18 +89,10 @@ export const resetPasswordSchema = z
     path: ["confirmPassword"],
   });
 
-// =============================================================================
-// TypeScript Types — Auth
-// =============================================================================
-
 export type LoginInput = z.infer<typeof loginSchema>;
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
-
-// =============================================================================
-// Auth Context Types
-// =============================================================================
 
 export type AuthUserRole = UserGlobalRole | CompanyMemberRole | "VENDOR_ADMIN" | "VENDOR_RECRUITER";
 
@@ -121,17 +101,11 @@ export interface AuthContext {
   email: string;
   globalRole: UserGlobalRole;
   isSuperAdmin: boolean;
-  // Set when operating within a company workspace
   tenantId?: string;
   companyRole?: CompanyMemberRole;
-  // Set when operating as a vendor
   vendorId?: string;
   vendorRole?: "ADMIN" | "RECRUITER";
 }
-
-// =============================================================================
-// Permission helpers
-// =============================================================================
 
 export function canManageVendors(role: CompanyMemberRole): boolean {
   return role === CompanyMemberRole.COMPANY_ADMIN;
