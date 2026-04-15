@@ -1,13 +1,13 @@
 // app/(auth)/auth/sign-in/page.tsx
 "use client"
 
-import { useState, useTransition } from "react"
+import { Suspense, useState, useTransition } from "react"
 import { signIn } from "next-auth/react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { Eye, EyeOff, Zap, ArrowRight, AlertCircle } from "lucide-react"
+import { Eye, EyeOff, ArrowRight, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -15,7 +15,7 @@ import { loginSchema, type LoginInput } from "@/types/auth"
 import { ROUTES } from "@/config/constants"
 import { cn } from "@/lib/utils"
 
-export default function SignInPage() {
+function SignInForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const callbackUrl = searchParams.get("callbackUrl") ?? ROUTES.DASHBOARD
@@ -66,17 +66,11 @@ export default function SignInPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Header */}
       <div className="space-y-2">
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">
-          Welcome back
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Sign in to your VendorFlow workspace
-        </p>
+        <h1 className="text-2xl font-bold tracking-tight text-foreground">Welcome back</h1>
+        <p className="text-sm text-muted-foreground">Sign in to your VendorFlow workspace</p>
       </div>
 
-      {/* Error alert */}
       {errorMessage && (
         <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
           <AlertCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
@@ -84,9 +78,7 @@ export default function SignInPage() {
         </div>
       )}
 
-      {/* Form */}
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-        {/* Email */}
         <div className="space-y-1.5">
           <Label htmlFor="email">Email address</Label>
           <Input
@@ -98,19 +90,13 @@ export default function SignInPage() {
             className={cn(errors.email && "border-destructive focus-visible:ring-destructive")}
             {...register("email")}
           />
-          {errors.email && (
-            <p className="text-xs text-destructive">{errors.email.message}</p>
-          )}
+          {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
         </div>
 
-        {/* Password */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <Label htmlFor="password">Password</Label>
-            <Link
-              href={ROUTES.FORGOT_PASSWORD}
-              className="text-xs text-primary hover:underline"
-            >
+            <Link href={ROUTES.FORGOT_PASSWORD} className="text-xs text-primary hover:underline">
               Forgot password?
             </Link>
           </div>
@@ -120,10 +106,7 @@ export default function SignInPage() {
               type={showPassword ? "text" : "password"}
               placeholder="••••••••"
               autoComplete="current-password"
-              className={cn(
-                "pr-10",
-                errors.password && "border-destructive focus-visible:ring-destructive"
-              )}
+              className={cn("pr-10", errors.password && "border-destructive focus-visible:ring-destructive")}
               {...register("password")}
             />
             <button
@@ -132,41 +115,21 @@ export default function SignInPage() {
               className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
               tabIndex={-1}
             >
-              {showPassword ? (
-                <EyeOff className="h-4 w-4" />
-              ) : (
-                <Eye className="h-4 w-4" />
-              )}
+              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>
           </div>
-          {errors.password && (
-            <p className="text-xs text-destructive">{errors.password.message}</p>
-          )}
+          {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
         </div>
 
-        {/* Submit */}
-        <Button
-          type="submit"
-          className="w-full"
-          size="lg"
-          loading={isPending}
-        >
-          {!isPending && (
-            <>
-              Sign in
-              <ArrowRight className="h-4 w-4" />
-            </>
-          )}
+        <Button type="submit" className="w-full" size="lg" loading={isPending}>
+          {!isPending && (<>Sign in <ArrowRight className="h-4 w-4" /></>)}
           {isPending && "Signing in…"}
         </Button>
       </form>
 
-      {/* Demo accounts hint (dev only) */}
       {process.env.NODE_ENV === "development" && (
         <div className="rounded-lg border border-dashed border-border bg-muted/30 p-4 space-y-2">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-            Demo accounts
-          </p>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Demo accounts</p>
           {[
             { label: "Company Admin", email: "priya@techcorpindia.com" },
             { label: "Hiring Manager", email: "arjun@techcorpindia.com" },
@@ -182,16 +145,27 @@ export default function SignInPage() {
         </div>
       )}
 
-      {/* Sign up link */}
       <p className="text-center text-sm text-muted-foreground">
         Don&apos;t have an account?{" "}
-        <Link
-          href={ROUTES.SIGN_UP}
-          className="font-medium text-primary hover:underline underline-offset-4"
-        >
+        <Link href={ROUTES.SIGN_UP} className="font-medium text-primary hover:underline underline-offset-4">
           Create one free
         </Link>
       </p>
     </div>
+  )
+}
+
+export default function SignInPage() {
+  return (
+    <Suspense fallback={
+      <div className="space-y-6">
+        <div className="space-y-2">
+          <h1 className="text-2xl font-bold tracking-tight">Welcome back</h1>
+          <p className="text-sm text-muted-foreground">Sign in to your VendorFlow workspace</p>
+        </div>
+      </div>
+    }>
+      <SignInForm />
+    </Suspense>
   )
 }
