@@ -7,7 +7,9 @@ import { ArrowLeft, CreditCard, ShieldCheck, Clock, CheckCircle2, Zap } from "lu
 import { Button } from "@/components/ui/button"
 import { StepIndicator } from "@/components/onboarding/step-indicator"
 import { getPlanById } from "@/config/plans"
-import { ROUTES, TRIAL_DAYS } from "@/config/constants"
+iimport { ROUTES } from "@/config/constants"
+
+const TRIAL_DAYS = 14
 import { createCheckoutSession } from "@/services/billing.service"
 import { cn } from "@/lib/utils"
 
