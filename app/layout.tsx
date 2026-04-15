@@ -45,6 +45,10 @@ export const metadata: Metadata = {
     follow: true,
     googleBot: { index: true, follow: true },
   },
+  other: {
+    "mobile-web-app-capable": "no",
+    "apple-mobile-web-app-capable": "no",
+  },
 }
 
 export const viewport: Viewport = {
