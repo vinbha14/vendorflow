@@ -133,9 +133,9 @@ export const authConfig: NextAuthConfig = {
         console.log(`[Auth] New user registered: ${user.email}`);
       }
     },
-    async signOut({ token }) {
-      if (token) {
-        console.log(`[Auth] User signed out: ${(token as { email?: string }).email ?? "unknown"}`);
+    async signOut() {
+      {
+        console.log("[Auth] User signed out");
       }
     },
   },
