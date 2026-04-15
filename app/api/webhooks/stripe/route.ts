@@ -1,7 +1,4 @@
 // app/api/webhooks/stripe/route.ts
-// Handles all Stripe webhook events for subscription management.
-// This route must be excluded from auth middleware (already handled in middleware.ts).
-
 import { NextRequest, NextResponse } from "next/server"
 import Stripe from "stripe"
 import { prisma } from "@/lib/prisma"
@@ -34,55 +31,41 @@ export async function POST(req: NextRequest) {
 
   try {
     switch (event.type) {
-      // ─── Checkout completed — customer paid / started trial ───────────────
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session
         await handleCheckoutCompleted(session)
         break
       }
-
-      // ─── Subscription created ─────────────────────────────────────────────
       case "customer.subscription.created": {
         const subscription = event.data.object as Stripe.Subscription
         await handleSubscriptionCreated(subscription)
         break
       }
-
-      // ─── Subscription updated (plan change, status change) ────────────────
       case "customer.subscription.updated": {
         const subscription = event.data.object as Stripe.Subscription
         await handleSubscriptionUpdated(subscription)
         break
       }
-
-      // ─── Subscription deleted (canceled) ─────────────────────────────────
       case "customer.subscription.deleted": {
         const subscription = event.data.object as Stripe.Subscription
         await handleSubscriptionDeleted(subscription)
         break
       }
-
-      // ─── Invoice payment succeeded ────────────────────────────────────────
       case "invoice.payment_succeeded": {
         const invoice = event.data.object as Stripe.Invoice
         await handlePaymentSucceeded(invoice)
         break
       }
-
-      // ─── Invoice payment failed ───────────────────────────────────────────
       case "invoice.payment_failed": {
         const invoice = event.data.object as Stripe.Invoice
         await handlePaymentFailed(invoice)
         break
       }
-
-      // ─── Trial ending soon (3 days before) ───────────────────────────────
       case "customer.subscription.trial_will_end": {
         const subscription = event.data.object as Stripe.Subscription
         await handleTrialWillEnd(subscription)
         break
       }
-
       default:
         console.log(`[Stripe Webhook] Unhandled event type: ${event.type}`)
     }
@@ -93,10 +76,6 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ received: true })
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Handlers
-// ─────────────────────────────────────────────────────────────────────────────
 
 async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   const companyId = session.metadata?.["companyId"] ?? session.client_reference_id
@@ -116,7 +95,6 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
       planId: dbPlan.id,
       stripeCustomerId: session.customer as string,
       stripeSubscriptionId: session.subscription as string,
-      stripePriceId: session.line_items?.data[0]?.price?.id,
       status: "TRIALING",
       billingCycle: (billingCycle?.toUpperCase() as "MONTHLY" | "ANNUAL") ?? "MONTHLY",
     },
@@ -167,7 +145,6 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
   const status = mapStripeStatus(subscription.status)
   const newPriceId = subscription.items.data[0]?.price?.id
 
-  // Detect plan change
   let planId = dbSub.planId
   if (newPriceId && newPriceId !== dbSub.stripePriceId) {
     const newPlan = await prisma.plan.findFirst({
@@ -227,7 +204,6 @@ async function handlePaymentSucceeded(invoice: Stripe.Invoice) {
   })
   if (!dbSub) return
 
-  // Clear past_due if it was set
   await prisma.subscription.updateMany({
     where: { stripeCustomerId },
     data: {
@@ -237,7 +213,6 @@ async function handlePaymentSucceeded(invoice: Stripe.Invoice) {
     },
   })
 
-  // Send receipt notification (email handled separately via Resend)
   await prisma.notification.create({
     data: {
       userId: await getCompanyAdminUserId(dbSub.companyId),
@@ -247,7 +222,7 @@ async function handlePaymentSucceeded(invoice: Stripe.Invoice) {
       body: `Your payment of $${(invoice.amount_paid / 100).toFixed(2)} was processed successfully.`,
       link: "/dashboard/billing",
     },
-  }).catch(() => {}) // Non-critical
+  }).catch(() => {})
 }
 
 async function handlePaymentFailed(invoice: Stripe.Invoice) {
@@ -268,7 +243,6 @@ async function handlePaymentFailed(invoice: Stripe.Invoice) {
     },
   })
 
-  // Send billing alert notification
   const adminUserId = await getCompanyAdminUserId(dbSub.companyId)
   await prisma.notification.create({
     data: {
@@ -282,7 +256,7 @@ async function handlePaymentFailed(invoice: Stripe.Invoice) {
   }).catch(() => {})
 
   await writeAuditLog(dbSub.companyId, AUDIT_ACTIONS.PAYMENT_FAILED, "Subscription", dbSub.id, {
-    gracePeriodEnd,
+    gracePeriodEnd: gracePeriodEnd.toISOString(),
   })
 }
 
@@ -302,10 +276,6 @@ async function handleTrialWillEnd(subscription: Stripe.Subscription) {
     },
   }).catch(() => {})
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
 function mapStripeStatus(
   stripeStatus: Stripe.Subscription.Status
@@ -334,9 +304,9 @@ async function getCompanyAdminUserId(companyId: string): Promise<string> {
 async function writeAuditLog(
   companyId: string,
   action: string,
-  entity,
-      entityId,
-      after: after as import("@prisma/client").Prisma.InputJsonValue,
+  entity: string,
+  entityId: string,
+  after: Record<string, string | number | boolean | null | undefined>
 ) {
   const admin = await prisma.companyMember.findFirst({
     where: { companyId, role: "COMPANY_ADMIN", isActive: true },
@@ -353,7 +323,7 @@ async function writeAuditLog(
       action,
       entity,
       entityId,
-      after,
+      after: after as Record<string, string>,
     },
   }).catch(console.error)
 }
