@@ -24,14 +24,6 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 
 interface NavItem {
   href: string
@@ -69,35 +61,6 @@ const companyAdminNav: NavItem[] = [
   { href: ROUTES.DASHBOARD_AUDIT_LOGS, label: "Audit Logs", icon: ScrollText },
   { href: ROUTES.DASHBOARD_SETTINGS, label: "Settings", icon: Settings },
 ]
-
-function DropdownMenuImport() {
-  return null
-}
-
-// Inline dropdown since we need it immediately
-function UserMenu({ user }: { user: SidebarProps["user"] }) {
-  return (
-    <div className="relative group">
-      <button className="flex w-full items-center gap-3 rounded-lg p-2 text-sidebar-foreground hover:bg-sidebar-accent transition-colors">
-        <Avatar className="h-8 w-8 shrink-0">
-          {user.image && <AvatarImage src={user.image} alt={user.name ?? ""} />}
-          <AvatarFallback className="bg-primary/20 text-primary text-xs font-semibold">
-            {getInitials(user.name ?? user.email)}
-          </AvatarFallback>
-        </Avatar>
-        <div className="min-w-0 flex-1 text-left">
-          <p className="text-sm font-medium truncate text-sidebar-foreground">
-            {user.name ?? "User"}
-          </p>
-          <p className="text-xs text-sidebar-foreground/60 truncate">
-            {user.email}
-          </p>
-        </div>
-        <ChevronDown className="h-4 w-4 text-sidebar-foreground/40 shrink-0" />
-      </button>
-    </div>
-  )
-}
 
 export function DashboardSidebar({
   user,
@@ -242,24 +205,4 @@ export function DashboardSidebar({
       </div>
     </aside>
   )
-}
-
-// Dropdown menu stub to avoid import issues — full implementation in separate file
-function DropdownMenu({ children }: { children: React.ReactNode }) {
-  return <>{children}</>
-}
-function DropdownMenuTrigger({ children }: { children: React.ReactNode; asChild?: boolean }) {
-  return <>{children}</>
-}
-function DropdownMenuContent({ children }: { children: React.ReactNode; align?: string; className?: string }) {
-  return <>{children}</>
-}
-function DropdownMenuLabel({ children }: { children: React.ReactNode }) {
-  return <>{children}</>
-}
-function DropdownMenuSeparator() {
-  return null
-}
-function DropdownMenuItem({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) {
-  return <div onClick={onClick}>{children}</div>
 }
