@@ -334,9 +334,9 @@ async function getCompanyAdminUserId(companyId: string): Promise<string> {
 async function writeAuditLog(
   companyId: string,
   action: string,
-  entity: string,
-  entityId: string,
-  after: Record<string, unknown>
+  entity,
+      entityId,
+      after: after as import("@prisma/client").Prisma.InputJsonValue,
 ) {
   const admin = await prisma.companyMember.findFirst({
     where: { companyId, role: "COMPANY_ADMIN", isActive: true },
