@@ -75,7 +75,7 @@ export const subdomainSchema = z
     "Subdomain can only contain lowercase letters, numbers, and hyphens. Must start and end with a letter or number."
   )
   .refine(
-    (v) => !RESERVED_SUBDOMAINS.includes(v),
+    (v) => !RESERVED_SUBDOMAINS.includes(v as typeof RESERVED_SUBDOMAINS[number]),
     "This subdomain is reserved. Please choose a different one."
   );
 
