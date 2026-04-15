@@ -14,6 +14,7 @@ import { ROUTES } from "@/config/constants"
 // Routes that never need auth
 const PUBLIC_PATHS = [
   "/",
+  "/auth",             // sign-in, sign-up, error, verify-email
   "/features",
   "/pricing",
   "/about",
