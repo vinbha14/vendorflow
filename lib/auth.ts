@@ -1,0 +1,269 @@
+// lib/auth.ts
+// Auth.js v5 (NextAuth) — Full configuration
+// Supports credentials (email/password) + future OAuth providers
+// Injects tenant context and role info into session
+
+import NextAuth from "next-auth";
+import Credentials from "next-auth/providers/credentials";
+import { PrismaAdapter } from "@auth/prisma-adapter";
+import bcrypt from "bcryptjs";
+import { prisma } from "@/lib/prisma";
+import { UserGlobalRole } from "@prisma/client";
+import type { NextAuthConfig } from "next-auth";
+import { loginSchema } from "@/types/auth";
+
+export const authConfig: NextAuthConfig = {
+  adapter: PrismaAdapter(prisma),
+  session: {
+    strategy: "jwt",
+    maxAge: 30 * 24 * 60 * 60, // 30 days
+  },
+  pages: {
+    signIn: "/auth/sign-in",
+    error: "/auth/error",
+    verifyRequest: "/auth/verify-email",
+    newUser: "/onboarding/company-details",
+  },
+  providers: [
+    Credentials({
+      name: "credentials",
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" },
+      },
+      async authorize(credentials) {
+        // Validate input shape
+        const parsed = loginSchema.safeParse(credentials);
+        if (!parsed.success) {
+          return null;
+        }
+
+        const { email, password } = parsed.data;
+
+        // Find user
+        const user = await prisma.user.findUnique({
+          where: { email: email.toLowerCase().trim() },
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            image: true,
+            hashedPassword: true,
+            globalRole: true,
+            isActive: true,
+            emailVerified: true,
+          },
+        });
+
+        if (!user || !user.isActive) {
+          return null;
+        }
+
+        // Check password
+        if (!user.hashedPassword) {
+          // User registered with OAuth, no password
+          return null;
+        }
+
+        const passwordValid = await bcrypt.compare(password, user.hashedPassword);
+        if (!passwordValid) {
+          return null;
+        }
+
+        // Update last login
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { lastLoginAt: new Date() },
+        });
+
+        return {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          image: user.image,
+          globalRole: user.globalRole,
+          emailVerified: user.emailVerified,
+        };
+      },
+    }),
+    // Google OAuth — uncomment when ready
+    // Google({
+    //   clientId: process.env.AUTH_GOOGLE_ID!,
+    //   clientSecret: process.env.AUTH_GOOGLE_SECRET!,
+    // }),
+  ],
+  callbacks: {
+    async jwt({ token, user, trigger, session }) {
+      // Initial sign in — populate token with user data
+      if (user) {
+        token["id"] = user.id;
+        token["email"] = user.email;
+        token["name"] = user.name;
+        token["globalRole"] = (user as { globalRole?: UserGlobalRole }).globalRole ?? UserGlobalRole.USER;
+      }
+
+      // Handle session update trigger (e.g., after role change)
+      if (trigger === "update" && session) {
+        token["globalRole"] = session.globalRole ?? token["globalRole"];
+      }
+
+      return token;
+    },
+    async session({ session, token }) {
+      if (token && session.user) {
+        session.user.id = token["id"] as string;
+        session.user.email = token["email"] as string;
+        session.user.name = token["name"] as string;
+        session.user.globalRole = token["globalRole"] as UserGlobalRole;
+      }
+      return session;
+    },
+    async signIn({ user }) {
+      // Allow all sign-ins at the provider level
+      // Fine-grained access control is done at the route/middleware level
+      if (!user.email) return false;
+      return true;
+    },
+  },
+  events: {
+    async signIn({ user, isNewUser }) {
+      // Could write to audit log here, but we do it at the API level
+      // to have access to the request context (IP, user agent)
+      if (isNewUser) {
+        console.log(`[Auth] New user registered: ${user.email}`);
+      }
+    },
+    async signOut({ token }) {
+      if (token) {
+        console.log(`[Auth] User signed out: ${(token as { email?: string }).email ?? "unknown"}`);
+      }
+    },
+  },
+  trustHost: true,
+};
+
+export const { handlers, auth, signIn, signOut } = NextAuth(authConfig);
+
+// =============================================================================
+// Helper: Get session (server-side)
+// Use this in server components and server actions
+// =============================================================================
+export async function getSession() {
+  return await auth();
+}
+
+// =============================================================================
+// Helper: Require authentication
+// Throws if the user is not authenticated
+// =============================================================================
+export async function requireAuth() {
+  const session = await auth();
+  if (!session?.user) {
+    throw new Error("UNAUTHORIZED");
+  }
+  return session;
+}
+
+// =============================================================================
+// Helper: Require super admin
+// =============================================================================
+export async function requireSuperAdmin() {
+  const session = await requireAuth();
+  if (session.user.globalRole !== UserGlobalRole.SUPER_ADMIN) {
+    throw new Error("FORBIDDEN");
+  }
+  return session;
+}
+
+// =============================================================================
+// Helper: Get current user with company membership
+// Use in dashboard routes to get role-scoped access
+// =============================================================================
+export async function getCurrentUserWithMembership(companyId: string) {
+  const session = await requireAuth();
+
+  if (session.user.globalRole === UserGlobalRole.SUPER_ADMIN) {
+    return {
+      user: session.user,
+      membership: null,
+      isSuperAdmin: true,
+      role: "SUPER_ADMIN" as const,
+    };
+  }
+
+  const membership = await prisma.companyMember.findUnique({
+    where: {
+      userId_companyId: {
+        userId: session.user.id,
+        companyId,
+      },
+    },
+    include: {
+      user: {
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          image: true,
+          globalRole: true,
+        },
+      },
+    },
+  });
+
+  if (!membership || !membership.isActive) {
+    throw new Error("FORBIDDEN");
+  }
+
+  return {
+    user: session.user,
+    membership,
+    isSuperAdmin: false,
+    role: membership.role,
+  };
+}
+
+// =============================================================================
+// Helper: Get current user's vendor context
+// =============================================================================
+export async function getCurrentUserVendorContext() {
+  const session = await requireAuth();
+
+  const vendorUser = await prisma.vendorUser.findFirst({
+    where: {
+      userId: session.user.id,
+      isActive: true,
+    },
+    include: {
+      vendor: {
+        include: {
+          companyRelationships: {
+            where: { status: "APPROVED" },
+            include: {
+              company: {
+                include: {
+                  branding: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!vendorUser) {
+    throw new Error("FORBIDDEN: Not a vendor user");
+  }
+
+  return {
+    user: session.user,
+    vendorUser,
+    vendor: vendorUser.vendor,
+    vendorRole: vendorUser.role as "ADMIN" | "RECRUITER",
+    assignedCompanies: vendorUser.vendor.companyRelationships.map((vc) => ({
+      ...vc.company,
+      vendorRelationship: vc,
+    })),
+  };
+}

@@ -1,0 +1,125 @@
+# .github/workflows/ci.yml
+# Runs on every push and pull request to main.
+# Checks: TypeScript, ESLint, unit tests, integration tests.
+# E2E tests run separately (they need a running server).
+
+name: CI
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ─── Job 1: Type check + lint ───────────────────────────────────────────────
+  typecheck:
+    name: TypeScript & ESLint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: TypeScript check
+        run: npm run typecheck
+
+      - name: ESLint
+        run: npm run lint
+
+  # ─── Job 2: Unit + Integration tests ────────────────────────────────────────
+  test:
+    name: Unit & Integration Tests
+    runs-on: ubuntu-latest
+    env:
+      # Test environment uses in-memory mocks — no real DB needed
+      DATABASE_URL: "postgresql://test:test@localhost:5432/test"
+      DIRECT_DATABASE_URL: "postgresql://test:test@localhost:5432/test"
+      AUTH_SECRET: "test-secret-for-ci-only-32-characters"
+      AUTH_URL: "http://localhost:3000"
+      OPENAI_API_KEY: "sk-test-fake-key"
+      STRIPE_SECRET_KEY: "sk_test_fake"
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: "pk_test_fake"
+      STRIPE_WEBHOOK_SECRET: "whsec_test_fake"
+      RESEND_API_KEY: "re_test_fake"
+      RESEND_FROM_EMAIL: "test@test.com"
+      R2_ACCOUNT_ID: "test"
+      R2_ACCESS_KEY_ID: "test"
+      R2_SECRET_ACCESS_KEY: "test"
+      R2_BUCKET_NAME: "test-bucket"
+      R2_PUBLIC_URL: "https://test.r2.dev"
+      NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+      NEXT_PUBLIC_APP_DOMAIN: "localhost:3000"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Run unit and integration tests
+        run: npm run test
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage/
+
+  # ─── Job 3: Build check ──────────────────────────────────────────────────────
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: "postgresql://test:test@localhost:5432/test"
+      AUTH_SECRET: "test-secret-for-ci-only-32-characters"
+      AUTH_URL: "http://localhost:3000"
+      OPENAI_API_KEY: "sk-test"
+      STRIPE_SECRET_KEY: "sk_test_fake"
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: "pk_test_fake"
+      STRIPE_WEBHOOK_SECRET: "whsec_fake"
+      RESEND_API_KEY: "re_fake"
+      RESEND_FROM_EMAIL: "test@test.com"
+      R2_ACCOUNT_ID: "test"
+      R2_ACCESS_KEY_ID: "test"
+      R2_SECRET_ACCESS_KEY: "test"
+      R2_BUCKET_NAME: "test"
+      R2_PUBLIC_URL: "https://test.r2.dev"
+      NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+      NEXT_PUBLIC_APP_DOMAIN: "localhost:3000"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Build Next.js app
+        run: npm run build

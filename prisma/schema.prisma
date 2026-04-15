@@ -1,0 +1,895 @@
+// =============================================================================
+// VendorFlow — Prisma Schema
+// PostgreSQL + pgvector for semantic duplicate detection
+// =============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_DATABASE_URL")
+  extensions = [pgvector(map: "vector", schema: "public"), uuidOssp(map: "uuid-ossp", schema: "public"), pgTrgm(map: "pg_trgm", schema: "public")]
+}
+
+// =============================================================================
+// ENUMS
+// =============================================================================
+
+enum UserGlobalRole {
+  SUPER_ADMIN
+  USER
+}
+
+enum CompanyMemberRole {
+  COMPANY_ADMIN
+  HIRING_MANAGER
+}
+
+enum CompanyStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum VendorStatus {
+  INVITED
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+enum VendorCompanyStatus {
+  INVITED
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+enum CandidateSubmissionStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  SHORTLISTED
+  INTERVIEW
+  OFFER_SENT
+  REJECTED
+  HIRED
+  WITHDRAWN
+}
+
+enum DuplicateAlertSeverity {
+  POSSIBLE      // 50–70% confidence
+  LIKELY        // 70–90% confidence
+  HIGH_CONFIDENCE // 90%+ confidence
+}
+
+enum DuplicateAlertStatus {
+  OPEN
+  REVIEWED
+  DISMISSED
+}
+
+enum DuplicateReviewDecision {
+  CONFIRMED_DUPLICATE
+  NOT_DUPLICATE
+  MERGE_REQUESTED
+  IGNORED
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  INCOMPLETE
+  PAUSED
+  UNPAID
+}
+
+enum BillingCycle {
+  MONTHLY
+  ANNUAL
+}
+
+enum InvitationType {
+  VENDOR
+  TEAM_MEMBER
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
+enum VendorDocumentType {
+  GST_CERTIFICATE
+  PAN_CARD
+  BUSINESS_REGISTRATION
+  BANK_DETAILS
+  TRADE_LICENSE
+  ISO_CERTIFICATE
+  OTHER
+}
+
+enum CandidateDocumentType {
+  CV
+  COVER_LETTER
+  PORTFOLIO
+  REFERENCE_LETTER
+  CERTIFICATION
+  OTHER
+}
+
+enum DocumentVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+}
+
+enum AiSummaryStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  FREELANCE
+  INTERNSHIP
+}
+
+// =============================================================================
+// CORE PLATFORM ENTITIES
+// =============================================================================
+
+// Auth.js required tables
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// Platform user — exists at platform level, not tenant level
+// Role is determined by CompanyMember (for company users) or globalRole (for super admin)
+model User {
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email          String         @unique
+  emailVerified  DateTime?      @map("email_verified")
+  name           String?
+  image          String?
+  hashedPassword String?        @map("hashed_password") @db.Text
+  globalRole     UserGlobalRole @default(USER) @map("global_role")
+  isActive       Boolean        @default(true) @map("is_active")
+  lastLoginAt    DateTime?      @map("last_login_at")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  // Relations
+  accounts          Account[]
+  sessions          Session[]
+  companyMemberships CompanyMember[]
+  vendorAccounts    VendorUser[]
+  auditLogsActed    AuditLog[]        @relation("AuditLogActor")
+  notificationsReceived Notification[]
+  invitationsSent   Invitation[]      @relation("InvitationSender")
+  duplicateReviews  DuplicateReview[]
+  candidateNotes    CandidateNote[]
+  submissionsReviewed CandidateSubmission[] @relation("SubmissionReviewer")
+
+  @@index([email])
+  @@index([globalRole])
+  @@map("users")
+}
+
+// =============================================================================
+// COMPANY / TENANT
+// =============================================================================
+
+model Company {
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
+  slug        String        @unique // Used in subdomain: slug.vendorflow.com
+  subdomain   String        @unique // Same as slug for now; separate for future custom domain
+  logoUrl     String?       @map("logo_url")
+  website     String?
+  // Legal & regional
+  legalName   String?       @map("legal_name")
+  taxId       String?       @map("tax_id") // GST/VAT/EIN
+  country     String        @default("IN") // ISO 3166-1 alpha-2
+  state       String?
+  city        String?
+  address     String?
+  postalCode  String?       @map("postal_code")
+  // Settings
+  currency    String        @default("INR")
+  timezone    String        @default("Asia/Kolkata")
+  industry    String?
+  size        String?       // "1-10", "11-50", "51-200", etc.
+  // Status
+  status      CompanyStatus @default(ACTIVE)
+  // Meta
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  deletedAt   DateTime?     @map("deleted_at")
+
+  // Relations
+  branding             CompanyBranding?
+  members              CompanyMember[]
+  vendorRelationships  VendorCompany[]
+  submissions          CandidateSubmission[]
+  invitations          Invitation[]
+  subscription         Subscription?
+  auditLogs            AuditLog[]
+  notifications        Notification[]
+  duplicateAlerts      DuplicateAlert[]
+  vendorDocuments      VendorDocument[]
+
+  @@index([slug])
+  @@index([subdomain])
+  @@index([status])
+  @@map("companies")
+}
+
+model CompanyBranding {
+  id                  String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId           String  @unique @map("company_id") @db.Uuid
+  primaryColor        String  @default("#4F46E5") @map("primary_color") // hex
+  secondaryColor      String  @default("#818CF8") @map("secondary_color") // hex
+  accentColor         String  @default("#C7D2FE") @map("accent_color") // hex
+  // Landing page content
+  tagline             String?
+  description         String? @db.Text
+  heroImageUrl        String? @map("hero_image_url")
+  // Contact
+  supportEmail        String? @map("support_email")
+  linkedinUrl         String? @map("linkedin_url")
+  // Landing page sections (stored as JSON for flexibility)
+  openOpportunities   Json?   @map("open_opportunities") // array of opportunity objects
+  teamHighlights      Json?   @map("team_highlights")
+  customSections      Json?   @map("custom_sections")
+  // Meta
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("company_branding")
+}
+
+// Join table: User <-> Company with role
+model CompanyMember {
+  id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String            @map("user_id") @db.Uuid
+  companyId   String            @map("company_id") @db.Uuid
+  role        CompanyMemberRole
+  isActive    Boolean           @default(true) @map("is_active")
+  invitedBy   String?           @map("invited_by") @db.Uuid
+  joinedAt    DateTime          @default(now()) @map("joined_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, companyId])
+  @@index([companyId])
+  @@index([userId])
+  @@map("company_members")
+}
+
+// =============================================================================
+// VENDOR
+// =============================================================================
+
+model Vendor {
+  id               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name             String
+  email            String       @unique
+  phone            String?
+  website          String?
+  // Business details
+  legalName        String?      @map("legal_name")
+  taxId            String?      @map("tax_id")
+  country          String       @default("IN")
+  city             String?
+  address          String?
+  // Classification
+  serviceCategories String[]    @map("service_categories")
+  geographicCoverage String[]   @map("geographic_coverage")
+  domainExpertise  String[]     @map("domain_expertise")
+  // Profile
+  logoUrl          String?      @map("logo_url")
+  description      String?      @db.Text
+  // Platform status (overall, not per-company)
+  status           VendorStatus @default(PENDING)
+  // Performance
+  overallRating    Float?       @map("overall_rating")
+  totalSubmissions Int          @default(0) @map("total_submissions")
+  // Meta
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+  deletedAt        DateTime?    @map("deleted_at")
+
+  // Relations
+  users            VendorUser[]
+  companyRelationships VendorCompany[]
+  candidates       CandidateProfile[]
+  documents        VendorDocument[]
+  submissions      CandidateSubmission[]
+
+  @@index([email])
+  @@index([status])
+  @@map("vendors")
+}
+
+// Users who belong to a vendor organization
+model VendorUser {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  vendorId    String   @map("vendor_id") @db.Uuid
+  role        String   @default("RECRUITER") // ADMIN | RECRUITER
+  isActive    Boolean  @default(true) @map("is_active")
+  joinedAt    DateTime @default(now()) @map("joined_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vendor Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, vendorId])
+  @@index([vendorId])
+  @@map("vendor_users")
+}
+
+// The relationship between a vendor and a company (approval, status, etc.)
+model VendorCompany {
+  id              String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  vendorId        String              @map("vendor_id") @db.Uuid
+  companyId       String              @map("company_id") @db.Uuid
+  status          VendorCompanyStatus @default(INVITED)
+  // Onboarding details specific to this company relationship
+  onboardingNotes String?             @map("onboarding_notes") @db.Text
+  contractStartDate DateTime?         @map("contract_start_date") @db.Date
+  contractEndDate DateTime?           @map("contract_end_date") @db.Date
+  // Performance within this company
+  rating          Float?
+  submissionsCount Int                @default(0) @map("submissions_count")
+  acceptedCount   Int                @default(0) @map("accepted_count")
+  // Who approved them
+  approvedBy      String?             @map("approved_by") @db.Uuid
+  approvedAt      DateTime?           @map("approved_at")
+  rejectedReason  String?             @map("rejected_reason") @db.Text
+  // Meta
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+
+  vendor  Vendor  @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([vendorId, companyId])
+  @@index([companyId])
+  @@index([vendorId])
+  @@index([status])
+  @@map("vendor_companies")
+}
+
+model VendorDocument {
+  id           String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  vendorId     String                     @map("vendor_id") @db.Uuid
+  companyId    String?                    @map("company_id") @db.Uuid // null = platform-level doc
+  fileName     String                     @map("file_name")
+  fileUrl      String                     @map("file_url")
+  fileSize     Int?                       @map("file_size") // bytes
+  mimeType     String?                    @map("mime_type")
+  docType      VendorDocumentType
+  status       DocumentVerificationStatus @default(PENDING)
+  rejectedReason String?                  @map("rejected_reason")
+  uploadedAt   DateTime                   @default(now()) @map("uploaded_at")
+  expiresAt    DateTime?                  @map("expires_at") // For documents with expiry
+
+  vendor  Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  company Company? @relation(fields: [companyId], references: [id])
+
+  @@index([vendorId])
+  @@index([companyId])
+  @@map("vendor_documents")
+}
+
+// =============================================================================
+// CANDIDATE PROFILES
+// =============================================================================
+
+model CandidateProfile {
+  id                  String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  vendorId            String         @map("vendor_id") @db.Uuid
+  // Personal
+  fullName            String         @map("full_name")
+  email               String?
+  phone               String?
+  // Professional
+  currentTitle        String?        @map("current_title")
+  currentCompany      String?        @map("current_company")
+  experienceYears     Float?         @map("experience_years")
+  // Location
+  location            String?
+  country             String?        @default("IN")
+  // Skills & expertise
+  skills              String[]
+  domainExpertise     String[]       @map("domain_expertise")
+  // Availability
+  noticePeriodDays    Int?           @map("notice_period_days")
+  availableFrom       DateTime?      @map("available_from") @db.Date
+  employmentType      EmploymentType? @map("employment_type")
+  // Compensation
+  expectedSalaryMin   Float?         @map("expected_salary_min")
+  expectedSalaryMax   Float?         @map("expected_salary_max")
+  salaryCurrency      String?        @default("INR") @map("salary_currency")
+  salaryPeriod        String?        @default("ANNUAL") @map("salary_period") // ANNUAL | MONTHLY | HOURLY
+  // Compliance
+  workAuthorization   String?        @map("work_authorization") // "Citizen", "PR", "H1B", etc.
+  visaType            String?        @map("visa_type")
+  // Education
+  highestDegree       String?        @map("highest_degree")
+  university          String?
+  graduationYear      Int?           @map("graduation_year")
+  // Files
+  resumeUrl           String?        @map("resume_url")
+  resumeText          String?        @map("resume_text") @db.Text // Extracted text for AI
+  // AI - stored as float array, type cast in application layer
+  // pgvector: we add the column via raw migration after schema push
+  // resumeEmbedding  Unsupported("vector(1536)")?
+  // LinkedIn
+  linkedinUrl         String?        @map("linkedin_url")
+  portfolioUrl        String?        @map("portfolio_url")
+  // Raw structured data from CV parsing
+  rawParsedData       Json?          @map("raw_parsed_data")
+  // Meta
+  createdAt           DateTime       @default(now()) @map("created_at")
+  updatedAt           DateTime       @updatedAt @map("updated_at")
+  deletedAt           DateTime?      @map("deleted_at")
+
+  // Relations
+  vendor      Vendor                @relation(fields: [vendorId], references: [id])
+  submissions CandidateSubmission[]
+  documents   CandidateDocument[]
+  aiSummary   AiSummary?
+  duplicatesA DuplicateAlert[]      @relation("DuplicateAlertProfileA")
+  duplicatesB DuplicateAlert[]      @relation("DuplicateAlertProfileB")
+  notes       CandidateNote[]
+
+  @@index([vendorId])
+  @@index([email])
+  @@index([phone])
+  @@index([fullName])
+  @@map("candidate_profiles")
+}
+
+// A submission = one profile submitted to one company for review
+model CandidateSubmission {
+  id              String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  profileId       String                    @map("profile_id") @db.Uuid
+  companyId       String                    @map("company_id") @db.Uuid
+  vendorId        String                    @map("vendor_id") @db.Uuid
+  // Which job requirement (future)
+  jobId           String?                   @map("job_id") @db.Uuid
+  // Status
+  status          CandidateSubmissionStatus @default(SUBMITTED)
+  // Hiring manager details
+  reviewedBy      String?                   @map("reviewed_by") @db.Uuid
+  reviewedAt      DateTime?                 @map("reviewed_at")
+  // Notes from the vendor when submitting
+  vendorNotes     String?                   @map("vendor_notes") @db.Text
+  // Internal hiring notes
+  internalNotes   String?                   @map("internal_notes") @db.Text
+  // Rejection reason
+  rejectedReason  String?                   @map("rejected_reason") @db.Text
+  // Interview stage tracking
+  interviewStage  String?                   @map("interview_stage")
+  // AI flag: was duplicate alert shown before review?
+  hasDuplicateAlert Boolean                 @default(false) @map("has_duplicate_alert")
+  // Meta
+  submittedAt     DateTime                  @default(now()) @map("submitted_at")
+  updatedAt       DateTime                  @updatedAt @map("updated_at")
+
+  profile    CandidateProfile @relation(fields: [profileId], references: [id])
+  company    Company          @relation(fields: [companyId], references: [id])
+  vendor     Vendor           @relation(fields: [vendorId], references: [id])
+  reviewer   User?            @relation("SubmissionReviewer", fields: [reviewedBy], references: [id])
+
+  @@index([companyId])
+  @@index([vendorId])
+  @@index([profileId])
+  @@index([status])
+  @@index([companyId, status])
+  @@map("candidate_submissions")
+}
+
+model CandidateDocument {
+  id         String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  profileId  String                @map("profile_id") @db.Uuid
+  fileName   String                @map("file_name")
+  fileUrl    String                @map("file_url")
+  fileSize   Int?                  @map("file_size")
+  mimeType   String?               @map("mime_type")
+  docType    CandidateDocumentType @default(CV)
+  uploadedAt DateTime              @default(now()) @map("uploaded_at")
+
+  profile CandidateProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+  @@map("candidate_documents")
+}
+
+model CandidateNote {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  profileId String   @map("profile_id") @db.Uuid
+  authorId  String   @map("author_id") @db.Uuid
+  content   String   @db.Text
+  isPrivate Boolean  @default(false) @map("is_private")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  profile CandidateProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  author  User             @relation(fields: [authorId], references: [id])
+
+  @@index([profileId])
+  @@map("candidate_notes")
+}
+
+// =============================================================================
+// AI FEATURES
+// =============================================================================
+
+model AiSummary {
+  id                  String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  profileId           String                   @unique @map("profile_id") @db.Uuid
+  status              AiSummaryStatus          @default(PENDING)
+
+  // ── Structured fields (machine-readable arrays + typed enum) ───────────────
+  // One-line headline for the card header
+  headlineSummary     String?                  @map("headline_summary") @db.Text
+  // Parsed years of experience (numeric)
+  yearsOfExperience   Float?                   @map("years_of_experience")
+  // Top 5–8 skills extracted and ranked by the model
+  topSkills           String[]                 @map("top_skills")
+  // Industries / domains worked in (e.g. ["FinTech", "E-Commerce"])
+  industries          String[]
+  // Current + recent employers as clean strings
+  employers           String[]
+  // 2–4 bullet strengths
+  strengthsList       String[]                 @map("strengths_list")
+  // 2–3 bullet risks or gaps
+  risksList           String[]                 @map("risks_list")
+  // Typed recommendation decision
+  recommendationDecision  AiRecommendation?    @map("recommendation_decision")
+
+  // ── Long-form prose fields (for detailed reading) ──────────────────────────
+  executiveSummary    String?                  @map("executive_summary") @db.Text
+  keySkillsSummary    String?                  @map("key_skills_summary") @db.Text
+  experienceSummary   String?                  @map("experience_summary") @db.Text
+  domainSummary       String?                  @map("domain_summary") @db.Text
+  strengthsSummary    String?                  @map("strengths_summary") @db.Text
+  possibleConcerns    String?                  @map("possible_concerns") @db.Text
+  workAuthSummary     String?                  @map("work_auth_summary") @db.Text
+  noticePeriodSummary String?                  @map("notice_period_summary") @db.Text
+  salarySummary       String?                  @map("salary_summary") @db.Text
+  locationSummary     String?                  @map("location_summary") @db.Text
+  recommendedAction   String?                  @map("recommended_action") @db.Text
+
+  // ── Fit scoring ────────────────────────────────────────────────────────────
+  fitScore            Int?                     @map("fit_score") // 0–100
+
+  // ── AI metadata ────────────────────────────────────────────────────────────
+  model               String?
+  promptTokens        Int?                     @map("prompt_tokens")
+  completionTokens    Int?                     @map("completion_tokens")
+  totalCost           Float?                   @map("total_cost") // USD
+  errorMessage        String?                  @map("error_message")
+  generatedAt         DateTime?                @map("generated_at")
+  createdAt           DateTime                 @default(now()) @map("created_at")
+  updatedAt           DateTime                 @updatedAt @map("updated_at")
+
+  profile CandidateProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@map("ai_summaries")
+}
+
+enum AiRecommendation {
+  SHORTLIST   // Strong fit — move to next round immediately
+  REVIEW      // Potential fit — needs human judgement
+  HOLD        // Possibly suitable — park for now
+  REJECT      // Not a fit — do not proceed
+}
+
+model DuplicateAlert {
+  id              String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId       String                 @map("company_id") @db.Uuid
+  profileAId      String                 @map("profile_a_id") @db.Uuid // The newer profile
+  profileBId      String                 @map("profile_b_id") @db.Uuid // The existing profile
+  // Detection results
+  confidenceScore Float                  @map("confidence_score") // 0.0–1.0
+  severity        DuplicateAlertSeverity
+  status          DuplicateAlertStatus   @default(OPEN)
+  // What matched
+  matchedFields   String[]               @map("matched_fields") // ["email", "phone", "name", "embedding"]
+  matchReason     String?                @map("match_reason") @db.Text
+  // Detection layer
+  detectionLayer  String?                @map("detection_layer") // "DETERMINISTIC" | "FUZZY" | "SEMANTIC"
+  similarityScore Float?                 @map("similarity_score") // cosine similarity from embedding
+  // Full scoring breakdown stored as JSON array of SignalResult objects
+  rawSignals      Json?                  @map("raw_signals")
+  // Human-readable recommendation string from the scoring engine
+  recommendation  String?                @db.Text
+  // Risk level: "low" | "medium" | "high"
+  riskLevel       String?                @default("medium") @map("risk_level")
+  // When a merge is requested, stores which profile to keep
+  mergeTargetProfileId String?           @map("merge_target_profile_id") @db.Uuid
+  // Meta
+  detectedAt      DateTime               @default(now()) @map("detected_at")
+  updatedAt       DateTime               @updatedAt @map("updated_at")
+
+  company  Company          @relation(fields: [companyId], references: [id])
+  profileA CandidateProfile @relation("DuplicateAlertProfileA", fields: [profileAId], references: [id])
+  profileB CandidateProfile @relation("DuplicateAlertProfileB", fields: [profileBId], references: [id])
+  reviews  DuplicateReview[]
+
+  @@index([companyId, status])
+  @@index([profileAId])
+  @@index([profileBId])
+  @@map("duplicate_alerts")
+}
+
+model DuplicateReview {
+  id          String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  alertId     String                   @map("alert_id") @db.Uuid
+  reviewedBy  String                   @map("reviewed_by") @db.Uuid
+  decision    DuplicateReviewDecision
+  notes       String?                  @db.Text
+  reviewedAt  DateTime                 @default(now()) @map("reviewed_at")
+
+  alert    DuplicateAlert @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  reviewer User           @relation(fields: [reviewedBy], references: [id])
+
+  @@index([alertId])
+  @@map("duplicate_reviews")
+}
+
+// =============================================================================
+// BILLING & SUBSCRIPTIONS
+// =============================================================================
+
+model Plan {
+  id                        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                      String   @unique // "starter" | "growth" | "scale" | "enterprise"
+  displayName               String   @map("display_name")
+  description               String?
+  maxVendors                Int      @map("max_vendors") // -1 = unlimited
+  maxTeamMembers            Int      @default(5) @map("max_team_members")
+  maxCandidatesPerMonth     Int      @default(-1) @map("max_candidates_per_month") // -1 = unlimited
+  // Features flags
+  hasAiSummaries            Boolean  @default(true) @map("has_ai_summaries")
+  hasDuplicateDetection     Boolean  @default(true) @map("has_duplicate_detection")
+  hasCustomBranding         Boolean  @default(true) @map("has_custom_branding")
+  hasApiAccess              Boolean  @default(false) @map("has_api_access")
+  hasPrioritySupport        Boolean  @default(false) @map("has_priority_support")
+  hasAuditLogs              Boolean  @default(false) @map("has_audit_logs")
+  hasSso                    Boolean  @default(false) @map("has_sso")
+  // Pricing
+  monthlyPrice              Decimal  @map("monthly_price") @db.Decimal(10, 2)
+  annualPrice               Decimal  @map("annual_price") @db.Decimal(10, 2)
+  currency                  String   @default("USD")
+  // Stripe
+  stripePriceIdMonthly      String?  @map("stripe_price_id_monthly")
+  stripePriceIdAnnual       String?  @map("stripe_price_id_annual")
+  // Display
+  sortOrder                 Int      @default(0) @map("sort_order")
+  isActive                  Boolean  @default(true) @map("is_active")
+  isFeatured                Boolean  @default(false) @map("is_featured")
+  badgeText                 String?  @map("badge_text") // "Most Popular"
+  // Meta
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id                    String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId             String             @unique @map("company_id") @db.Uuid
+  planId                String             @map("plan_id") @db.Uuid
+  // Stripe
+  stripeCustomerId      String?            @unique @map("stripe_customer_id")
+  stripeSubscriptionId  String?            @unique @map("stripe_subscription_id")
+  stripePriceId         String?            @map("stripe_price_id")
+  // Status & billing
+  status                SubscriptionStatus @default(TRIALING)
+  billingCycle          BillingCycle       @default(MONTHLY)
+  // Period
+  currentPeriodStart    DateTime?          @map("current_period_start")
+  currentPeriodEnd      DateTime?          @map("current_period_end")
+  trialStartsAt         DateTime?          @map("trial_starts_at")
+  trialEndsAt           DateTime?          @map("trial_ends_at")
+  canceledAt            DateTime?          @map("canceled_at")
+  cancelAtPeriodEnd     Boolean            @default(false) @map("cancel_at_period_end")
+  // Usage
+  activeVendorCount     Int                @default(0) @map("active_vendor_count")
+  // Grace period tracking
+  pastDueSince          DateTime?          @map("past_due_since")
+  gracePeriodEndsAt     DateTime?          @map("grace_period_ends_at")
+  // Meta
+  createdAt             DateTime           @default(now()) @map("created_at")
+  updatedAt             DateTime           @updatedAt @map("updated_at")
+
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  plan         Plan          @relation(fields: [planId], references: [id])
+  usageRecords UsageRecord[]
+
+  @@index([status])
+  @@index([stripeCustomerId])
+  @@index([stripeSubscriptionId])
+  @@map("subscriptions")
+}
+
+// Daily snapshots of vendor count for billing & analytics
+model UsageRecord {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  subscriptionId   String   @map("subscription_id") @db.Uuid
+  vendorCount      Int      @map("vendor_count")
+  candidateCount   Int      @default(0) @map("candidate_count")
+  aiSummaryCount   Int      @default(0) @map("ai_summary_count")
+  storageUsedMb    Float    @default(0) @map("storage_used_mb")
+  recordedAt       DateTime @default(now()) @map("recorded_at")
+  periodStart      DateTime @map("period_start") @db.Date
+  periodEnd        DateTime @map("period_end") @db.Date
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+  @@index([recordedAt])
+  @@map("usage_records")
+}
+
+// =============================================================================
+// INVITATIONS
+// =============================================================================
+
+model Invitation {
+  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId   String           @map("company_id") @db.Uuid
+  invitedBy   String           @map("invited_by") @db.Uuid
+  email       String
+  type        InvitationType
+  role        String?          // CompanyMemberRole or VendorUser role
+  token       String           @unique @default(dbgenerated("gen_random_uuid()"))
+  status      InvitationStatus @default(PENDING)
+  // Metadata for the invitee
+  vendorName  String?          @map("vendor_name") // Pre-fill vendor name if known
+  message     String?          @db.Text // Custom message to include in invitation email
+  expiresAt   DateTime         @map("expires_at")
+  acceptedAt  DateTime?        @map("accepted_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  inviter   User    @relation("InvitationSender", fields: [invitedBy], references: [id])
+
+  @@index([companyId])
+  @@index([email])
+  @@index([token])
+  @@index([status])
+  @@map("invitations")
+}
+
+// =============================================================================
+// NOTIFICATIONS
+// =============================================================================
+
+model Notification {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  companyId   String?  @map("company_id") @db.Uuid // null for platform-wide notifications
+  // Content
+  type        String   // "VENDOR_INVITED" | "SUBMISSION_RECEIVED" | "STATUS_CHANGED" | "DUPLICATE_DETECTED" | "BILLING_ALERT" | etc.
+  title       String
+  body        String
+  link        String?  // Deep link to the relevant page
+  // Metadata (any extra data for the notification)
+  metadata    Json?
+  // State
+  isRead      Boolean  @default(false) @map("is_read")
+  readAt      DateTime? @map("read_at")
+  // Meta
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company? @relation(fields: [companyId], references: [id])
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+  @@index([companyId])
+  @@map("notifications")
+}
+
+// =============================================================================
+// AUDIT LOGS
+// =============================================================================
+
+// Append-only. Never update or delete records.
+model AuditLog {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId   String?  @map("company_id") @db.Uuid // null for super admin actions
+  actorId     String   @map("actor_id") @db.Uuid
+  actorEmail  String   @map("actor_email")
+  actorRole   String   @map("actor_role")
+  // What happened
+  action      String   // e.g. "VENDOR_APPROVED", "CANDIDATE_SUBMITTED", "PLAN_UPGRADED"
+  entity      String   // e.g. "Vendor", "CandidateProfile", "Subscription"
+  entityId    String   @map("entity_id")
+  // Change details
+  before      Json?    // State before the action
+  after       Json?    // State after the action
+  // Request context
+  ipAddress   String?  @map("ip_address")
+  userAgent   String?  @map("user_agent") @db.Text
+  // Impersonation
+  isImpersonated Boolean @default(false) @map("is_impersonated")
+  impersonatedBy String? @map("impersonated_by") @db.Uuid
+  // Meta
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  company Company? @relation(fields: [companyId], references: [id])
+  actor   User     @relation("AuditLogActor", fields: [actorId], references: [id])
+
+  @@index([companyId, createdAt])
+  @@index([actorId])
+  @@index([action])
+  @@index([entity, entityId])
+  @@map("audit_logs")
+}
