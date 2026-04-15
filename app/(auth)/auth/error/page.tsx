@@ -1,6 +1,7 @@
 // app/(auth)/auth/error/page.tsx
 "use client"
 
+import { Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { AlertTriangle, ArrowLeft } from "lucide-react"
@@ -24,7 +25,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   Default: "An unexpected error occurred. Please try again.",
 }
 
-export default function AuthErrorPage() {
+function AuthErrorContent() {
   const searchParams = useSearchParams()
   const error = searchParams.get("error") ?? "Default"
   const message = ERROR_MESSAGES[error] ?? ERROR_MESSAGES["Default"]!
@@ -54,5 +55,25 @@ export default function AuthErrorPage() {
         </Button>
       </div>
     </div>
+  )
+}
+
+export default function AuthErrorPage() {
+  return (
+    <Suspense fallback={
+      <div className="space-y-6 animate-fade-in">
+        <div className="flex justify-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-destructive/10">
+            <AlertTriangle className="h-8 w-8 text-destructive" />
+          </div>
+        </div>
+        <div className="space-y-2 text-center">
+          <h1 className="text-2xl font-bold tracking-tight">Sign in error</h1>
+          <p className="text-sm text-muted-foreground">Loading error details...</p>
+        </div>
+      </div>
+    }>
+      <AuthErrorContent />
+    </Suspense>
   )
 }
