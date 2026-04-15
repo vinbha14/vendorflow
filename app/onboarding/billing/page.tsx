@@ -7,11 +7,11 @@ import { ArrowLeft, CreditCard, ShieldCheck, Clock, CheckCircle2, Zap } from "lu
 import { Button } from "@/components/ui/button"
 import { StepIndicator } from "@/components/onboarding/step-indicator"
 import { getPlanById } from "@/config/plans"
-iimport { ROUTES } from "@/config/constants"
-
-const TRIAL_DAYS = 14
+import { ROUTES } from "@/config/constants"
 import { createCheckoutSession } from "@/services/billing.service"
 import { cn } from "@/lib/utils"
+
+const TRIAL_DAYS = 14
 
 export default function BillingPage() {
   const router = useRouter()
