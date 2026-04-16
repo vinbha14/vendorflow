@@ -28,8 +28,17 @@ export default async function DashboardPage() {
   const session = await auth()
   if (!session?.user) redirect(ROUTES.SIGN_IN)
 
-  const { tenantId } = await getTenantFromHeaders()
-  if (!tenantId) redirect(ROUTES.SIGN_IN)
+  // tenant resolved from membership below
+  // Check if user has a company membership
+  const membership = await prisma.companyMember.findFirst({
+    where: { userId: session.user.id, isActive: true },
+    select: { companyId: true },
+  })
+
+  if (!membership) redirect(ROUTES.ONBOARDING_COMPANY)
+
+  const tenantId = membership.companyId
+  if (!tenantId) redirect(ROUTES.ONBOARDING_COMPANY)
 
   // Fetch all dashboard data in parallel
   const [

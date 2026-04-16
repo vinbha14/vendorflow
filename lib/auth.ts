@@ -15,7 +15,6 @@ export const authConfig: NextAuthConfig = {
   pages: {
     signIn: "/auth/sign-in",
     error: "/auth/error",
-    verifyRequest: "/auth/verify-email",
   },
   providers: [
     Credentials({
@@ -51,7 +50,6 @@ export const authConfig: NextAuthConfig = {
           const passwordValid = await bcrypt.compare(password, user.hashedPassword);
           if (!passwordValid) return null;
 
-          // Update last login (non-blocking)
           prisma.user.update({
             where: { id: user.id },
             data: { lastLoginAt: new Date() },
@@ -63,7 +61,6 @@ export const authConfig: NextAuthConfig = {
             name: user.name,
             image: user.image,
             globalRole: user.globalRole,
-            emailVerified: user.emailVerified,
           };
         } catch (err) {
           console.error("[Auth] authorize error:", err);
@@ -99,11 +96,6 @@ export const authConfig: NextAuthConfig = {
       return true;
     },
   },
-  events: {
-    async signOut() {
-      console.log("[Auth] User signed out");
-    },
-  },
   trustHost: true,
 };
 
@@ -127,26 +119,19 @@ export async function requireSuperAdmin() {
 
 export async function getCurrentUserWithMembership(companyId: string) {
   const session = await requireAuth();
-
   if (session.user.globalRole === UserGlobalRole.SUPER_ADMIN) {
     return { user: session.user, membership: null, isSuperAdmin: true, role: "SUPER_ADMIN" as const };
   }
-
   const membership = await prisma.companyMember.findUnique({
     where: { userId_companyId: { userId: session.user.id, companyId } },
-    include: {
-      user: { select: { id: true, email: true, name: true, image: true, globalRole: true } },
-    },
+    include: { user: { select: { id: true, email: true, name: true, image: true, globalRole: true } } },
   });
-
   if (!membership || !membership.isActive) throw new Error("FORBIDDEN");
-
   return { user: session.user, membership, isSuperAdmin: false, role: membership.role };
 }
 
 export async function getCurrentUserVendorContext() {
   const session = await requireAuth();
-
   const vendorUser = await prisma.vendorUser.findFirst({
     where: { userId: session.user.id, isActive: true },
     include: {
@@ -160,9 +145,7 @@ export async function getCurrentUserVendorContext() {
       },
     },
   });
-
   if (!vendorUser) throw new Error("FORBIDDEN: Not a vendor user");
-
   return {
     user: session.user,
     vendorUser,
