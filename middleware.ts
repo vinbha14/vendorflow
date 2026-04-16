@@ -1,12 +1,13 @@
 // middleware.ts
-import { auth } from "@/lib/auth"
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { ROUTES } from "@/config/constants"
+import { auth } from "@/lib/auth"
 
 const PUBLIC_PATHS = [
   "/",
   "/auth",
+  "/api/auth",
   "/features",
   "/pricing",
   "/about",
@@ -34,12 +35,17 @@ export default auth(async function middleware(req) {
   const { nextUrl } = req
   const pathname = nextUrl.pathname
 
-  // Skip static files
+  // Skip static files and Next.js internals
   if (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
     pathname.match(/\.(ico|png|jpg|jpeg|svg|css|js|woff|woff2|ttf|map)$/)
   ) {
+    return NextResponse.next()
+  }
+
+  // Always allow NextAuth API routes through
+  if (pathname.startsWith("/api/auth")) {
     return NextResponse.next()
   }
 
@@ -72,7 +78,7 @@ export default auth(async function middleware(req) {
     }
   }
 
-  // Redirect super admin away from dashboard
+  // Redirect super admin away from dashboard/onboarding
   if (pathname.startsWith("/dashboard") || pathname.startsWith("/onboarding")) {
     if (userRole === "SUPER_ADMIN") {
       return NextResponse.redirect(new URL(ROUTES.ADMIN, req.url))
