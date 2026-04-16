@@ -10,19 +10,13 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
-    "db:migrate": "prisma migrate dev",
     "db:migrate:prod": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
-    "postinstall": "prisma generate",
-    "test": "vitest run",
-    "test:e2e": "playwright test"
+    "postinstall": "prisma generate"
   },
   "dependencies": {
-    "@auth/prisma-adapter": "^2.7.2",
-    "@aws-sdk/client-s3": "^3.670.0",
-    "@aws-sdk/s3-request-presigner": "^3.670.0",
-    "@hookform/resolvers": "^3.9.1",
     "@prisma/client": "^5.22.0",
+    "@hookform/resolvers": "^3.9.1",
     "@radix-ui/react-avatar": "^1.1.1",
     "@radix-ui/react-dialog": "^1.1.2",
     "@radix-ui/react-dropdown-menu": "^2.1.2",
@@ -35,6 +29,8 @@
     "@radix-ui/react-tabs": "^1.1.1",
     "@radix-ui/react-toast": "^1.2.2",
     "@radix-ui/react-tooltip": "^1.1.3",
+    "@aws-sdk/client-s3": "^3.670.0",
+    "@aws-sdk/s3-request-presigner": "^3.670.0",
     "@trigger.dev/nextjs": "^3.3.1",
     "@trigger.dev/sdk": "^3.3.1",
     "autoprefixer": "^10.4.20",
@@ -46,7 +42,7 @@
     "lucide-react": "^0.460.0",
     "mammoth": "^1.8.0",
     "next": "15.3.6",
-    "next-auth": "^5.0.0-beta.25",
+    "next-auth": "4.24.11",
     "openai": "^4.70.1",
     "pdf-parse": "^1.1.1",
     "react": "^18.3.1",
@@ -62,25 +58,16 @@
     "zustand": "^5.0.1"
   },
   "devDependencies": {
-    "@playwright/test": "^1.49.0",
-    "@testing-library/jest-dom": "^6.6.3",
-    "@testing-library/react": "^16.1.0",
-    "@testing-library/user-event": "^14.5.2",
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",
     "@types/pdf-parse": "^1.1.4",
     "@types/react": "^18",
     "@types/react-dom": "^18",
-    "@vitejs/plugin-react": "^4.3.4",
-    "@vitest/coverage-v8": "^2.1.8",
-    "@vitest/ui": "^2.1.8",
     "eslint": "^8",
     "eslint-config-next": "15.3.6",
-    "jsdom": "^25.0.1",
     "postcss": "^8",
     "prisma": "^5.22.0",
     "tailwindcss": "^3.4.1",
-    "typescript": "^5",
-    "vitest": "^2.1.8"
+    "typescript": "^5"
   }
 }

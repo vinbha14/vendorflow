@@ -1,30 +1,32 @@
-// lib/auth.ts
-import NextAuth from "next-auth"
-import Credentials from "next-auth/providers/credentials"
+// lib/auth.ts — NextAuth v4
+import { NextAuthOptions, getServerSession } from "next-auth"
+import CredentialsProvider from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
 import { prisma } from "@/lib/prisma"
-import { UserGlobalRole } from "@prisma/client"
-import type { NextAuthConfig } from "next-auth"
 
-export const authConfig: NextAuthConfig = {
-  secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
-  session: { strategy: "jwt", maxAge: 30 * 24 * 60 * 60 },
-  pages: { signIn: "/auth/sign-in", error: "/auth/error" },
+export const authOptions: NextAuthOptions = {
+  secret: process.env.NEXTAUTH_SECRET,
+  session: {
+    strategy: "jwt",
+    maxAge: 30 * 24 * 60 * 60,
+  },
+  pages: {
+    signIn: "/auth/sign-in",
+    error: "/auth/error",
+  },
   providers: [
-    Credentials({
+    CredentialsProvider({
+      name: "credentials",
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        const email = (credentials?.email as string ?? "").toLowerCase().trim()
-        const password = credentials?.password as string ?? ""
-
-        if (!email || !password) return null
+        if (!credentials?.email || !credentials?.password) return null
 
         try {
           const user = await prisma.user.findUnique({
-            where: { email },
+            where: { email: credentials.email.toLowerCase().trim() },
             select: {
               id: true,
               email: true,
@@ -38,8 +40,14 @@ export const authConfig: NextAuthConfig = {
 
           if (!user || !user.isActive || !user.hashedPassword) return null
 
-          const valid = await bcrypt.compare(password, user.hashedPassword)
+          const valid = await bcrypt.compare(credentials.password, user.hashedPassword)
           if (!valid) return null
+
+          // Update last login non-blocking
+          prisma.user.update({
+            where: { id: user.id },
+            data: { lastLoginAt: new Date() },
+          }).catch(() => {})
 
           return {
             id: user.id,
@@ -49,7 +57,7 @@ export const authConfig: NextAuthConfig = {
             globalRole: user.globalRole,
           }
         } catch (err) {
-          console.error("[Auth] DB error during authorize:", err)
+          console.error("[Auth] authorize error:", err)
           return null
         }
       },
@@ -66,15 +74,17 @@ export const authConfig: NextAuthConfig = {
     async session({ session, token }) {
       if (session.user) {
         session.user.id = token.id as string
-        session.user.globalRole = token.globalRole as UserGlobalRole
+        session.user.globalRole = token.globalRole as string
       }
       return session
     },
   },
-  trustHost: true,
 }
 
-export const { handlers, auth, signIn, signOut } = NextAuth(authConfig)
+// Helper to get session in server components / server actions
+export async function auth() {
+  return getServerSession(authOptions)
+}
 
 export async function requireAuth() {
   const session = await auth()
@@ -84,13 +94,13 @@ export async function requireAuth() {
 
 export async function requireSuperAdmin() {
   const session = await requireAuth()
-  if (session.user.globalRole !== UserGlobalRole.SUPER_ADMIN) throw new Error("FORBIDDEN")
+  if (session.user.globalRole !== "SUPER_ADMIN") throw new Error("FORBIDDEN")
   return session
 }
 
 export async function getCurrentUserWithMembership(companyId: string) {
   const session = await requireAuth()
-  if (session.user.globalRole === UserGlobalRole.SUPER_ADMIN) {
+  if (session.user.globalRole === "SUPER_ADMIN") {
     return { user: session.user, membership: null, isSuperAdmin: true, role: "SUPER_ADMIN" as const }
   }
   const membership = await prisma.companyMember.findUnique({

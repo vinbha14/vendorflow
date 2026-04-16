@@ -1,18 +1,17 @@
 // app/dashboard/layout.tsx
 import { redirect } from "next/navigation"
-import { auth } from "@/lib/auth"
+import { getServerSession } from "next-auth"
+import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { ROUTES } from "@/config/constants"
 import { DashboardSidebar } from "@/components/dashboard/sidebar"
 import { DashboardHeader } from "@/components/dashboard/header"
-import { UserGlobalRole } from "@prisma/client"
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const session = await auth()
+  const session = await getServerSession(authOptions)
   if (!session?.user) redirect(ROUTES.SIGN_IN)
-  if (session.user.globalRole === UserGlobalRole.SUPER_ADMIN) redirect(ROUTES.ADMIN)
+  if (session.user.globalRole === "SUPER_ADMIN") redirect(ROUTES.ADMIN)
 
-  // Find company directly from DB — no subdomain/header needed
   let membership: any = null
   try {
     membership = await prisma.companyMember.findFirst({
@@ -47,8 +46,18 @@ export default async function DashboardLayout({ children }: { children: React.Re
   return (
     <div className="flex min-h-screen bg-background">
       <DashboardSidebar
-        user={{ id: session.user.id, name: session.user.name, email: session.user.email, image: session.user.image, role: membership.role }}
-        company={{ name: company.name, logoUrl: company.logoUrl, slug: company.slug }}
+        user={{
+          id: session.user.id,
+          name: session.user.name,
+          email: session.user.email,
+          image: session.user.image,
+          role: membership.role,
+        }}
+        company={{
+          name: company.name,
+          logoUrl: company.logoUrl,
+          slug: company.slug,
+        }}
         notificationCount={notificationCount}
         duplicateAlertCount={duplicateAlertCount}
         pendingVendorCount={pendingVendorCount}
