@@ -5,7 +5,6 @@ import bcrypt from "bcryptjs"
 import { prisma } from "@/lib/prisma"
 import { registerSchema, type RegisterInput } from "@/types/auth"
 import { AUDIT_ACTIONS } from "@/config/constants"
-import { headers } from "next/headers"
 
 export async function registerUser(input: RegisterInput): Promise<{
   success: boolean
@@ -19,9 +18,10 @@ export async function registerUser(input: RegisterInput): Promise<{
     }
 
     const { name, email, password } = parsed.data
+    const normalizedEmail = email.toLowerCase().trim()
 
     const existing = await prisma.user.findUnique({
-      where: { email },
+      where: { email: normalizedEmail },
       select: { id: true },
     })
 
@@ -34,45 +34,36 @@ export async function registerUser(input: RegisterInput): Promise<{
     const user = await prisma.user.create({
       data: {
         name,
-        email,
+        email: normalizedEmail,
         hashedPassword,
         globalRole: "USER",
         isActive: true,
-        emailVerified: new Date(), // Auto-verify for now
+        emailVerified: new Date(),
       },
     })
 
-    // Best-effort audit log — don't fail registration if this fails
+    // Non-fatal audit log
     try {
       await prisma.auditLog.create({
         data: {
-          companyId: null,
           actorId: user.id,
           actorEmail: user.email,
           actorRole: "USER",
           action: AUDIT_ACTIONS.USER_REGISTERED,
           entity: "User",
           entityId: user.id,
-          after: { email: user.email, name: user.name },
-          ipAddress: await getClientIp(),
         },
       })
-    } catch (auditErr) {
-      console.error("[Auth] Audit log failed (non-fatal):", auditErr)
-    }
+    } catch { /* non-fatal */ }
 
     return { success: true, userId: user.id }
   } catch (err) {
     console.error("[Auth] registerUser error:", err)
-    const message = err instanceof Error ? err.message : "Registration failed"
-    // Return friendly message for common DB errors
-    if (false) {
-      // schema mismatch removed
+    const msg = err instanceof Error ? err.message : ""
+    if (msg.includes("connect") || msg.includes("ECONNREFUSED")) {
+      return { success: false, error: "Database connection failed. Please try again." }
     }
-    if (message.includes("connect") || message.includes("authentication") || message.includes("ECONNREFUSED")) {
-      return { success: false, error: "Database connection failed — please try again shortly." }
-    }
-    return { success: false, error: `Registration failed: ${message.slice(0, 300)}` }
+    return { success: false, error: "Registration failed. Please try again." }
   }
 }
 
@@ -92,94 +83,46 @@ export async function requestPasswordReset(email: string): Promise<{ success: bo
   try {
     const user = await prisma.user.findUnique({
       where: { email: email.toLowerCase().trim() },
-      select: { id: true, email: true, name: true },
+      select: { id: true, email: true },
     })
-
     if (user) {
       const token = crypto.randomUUID()
       const expires = new Date(Date.now() + 24 * 60 * 60 * 1000)
-
       await prisma.verificationToken.upsert({
         where: { identifier_token: { identifier: user.email, token: "password-reset" } },
         update: { token, expires },
         create: { identifier: user.email, token, expires },
       })
-
-      console.log(`[Auth] Password reset token for ${user.email}: ${token}`)
+      console.log(`[Auth] Reset token for ${user.email}: ${token}`)
     }
   } catch (err) {
     console.error("[Auth] requestPasswordReset error:", err)
   }
-
   return { success: true }
 }
 
-export async function resetPassword(
-  token: string,
-  newPassword: string
-): Promise<{ success: boolean; error?: string }> {
+export async function resetPassword(token: string, newPassword: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const verificationToken = await prisma.verificationToken.findFirst({
+    const vt = await prisma.verificationToken.findFirst({
       where: { token, expires: { gt: new Date() } },
     })
-
-    if (!verificationToken) {
-      return { success: false, error: "This reset link is invalid or has expired." }
-    }
+    if (!vt) return { success: false, error: "Reset link is invalid or expired." }
 
     const user = await prisma.user.findUnique({
-      where: { email: verificationToken.identifier },
+      where: { email: vt.identifier },
       select: { id: true, email: true },
     })
-
-    if (!user) {
-      return { success: false, error: "User not found." }
-    }
+    if (!user) return { success: false, error: "User not found." }
 
     const hashedPassword = await bcrypt.hash(newPassword, 12)
-
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { hashedPassword },
-    })
-
+    await prisma.user.update({ where: { id: user.id }, data: { hashedPassword } })
     await prisma.verificationToken.delete({
-      where: { identifier_token: { identifier: verificationToken.identifier, token } },
+      where: { identifier_token: { identifier: vt.identifier, token } },
     })
-
-    try {
-      await prisma.auditLog.create({
-        data: {
-          companyId: null,
-          actorId: user.id,
-          actorEmail: user.email,
-          actorRole: "USER",
-          action: AUDIT_ACTIONS.USER_PASSWORD_CHANGED,
-          entity: "User",
-          entityId: user.id,
-          ipAddress: await getClientIp(),
-        },
-      })
-    } catch (auditErr) {
-      console.error("[Auth] Audit log failed (non-fatal):", auditErr)
-    }
 
     return { success: true }
   } catch (err) {
     console.error("[Auth] resetPassword error:", err)
-    return { success: false, error: "Password reset failed. Please try again." }
-  }
-}
-
-async function getClientIp(): Promise<string> {
-  try {
-    const headersList = await headers()
-    return (
-      headersList.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-      headersList.get("x-real-ip") ??
-      "unknown"
-    )
-  } catch {
-    return "unknown"
+    return { success: false, error: "Password reset failed." }
   }
 }

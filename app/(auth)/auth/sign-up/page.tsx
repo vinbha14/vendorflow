@@ -5,18 +5,14 @@ import { Suspense, useState, useTransition } from "react"
 import { signIn } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { useForm } from "react-hook-form"
-import { zodResolver } from "@hookform/resolvers/zod"
-import { Eye, EyeOff, ArrowRight, CheckCircle2, XCircle } from "lucide-react"
+import { Eye, EyeOff, ArrowRight, XCircle, CheckCircle2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { registerSchema, type RegisterInput } from "@/types/auth"
 import { registerUser } from "@/services/auth.service"
 import { ROUTES } from "@/config/constants"
-import { cn } from "@/lib/utils"
 
-const PASSWORD_RULES = [
+const RULES = [
   { label: "At least 8 characters", test: (p: string) => p.length >= 8 },
   { label: "One uppercase letter", test: (p: string) => /[A-Z]/.test(p) },
   { label: "One number", test: (p: string) => /[0-9]/.test(p) },
@@ -25,170 +21,105 @@ const PASSWORD_RULES = [
 
 function SignUpForm() {
   const router = useRouter()
-  const [showPassword, setShowPassword] = useState(false)
-  const [serverError, setServerError] = useState<string | null>(null)
+  const [name, setName] = useState("")
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [confirm, setConfirm] = useState("")
+  const [showPwd, setShowPwd] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-    watch,
-  } = useForm<RegisterInput>({
-    resolver: zodResolver(registerSchema),
-    mode: "onChange",
-  })
-
-  const watchedPassword = watch("password", "")
-
-  const onSubmit = (data: RegisterInput) => {
-    setServerError(null)
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (password !== confirm) { setError("Passwords do not match."); return }
+    setError(null)
     startTransition(async () => {
       try {
-        const result = await registerUser(data)
+        const result = await registerUser({ name, email, password, confirmPassword: confirm })
+        if (!result?.success) { setError(result?.error ?? "Registration failed."); return }
 
-        if (!result || !result.success) {
-          setServerError(result?.error ?? "Registration failed. Please try again.")
-          return
-        }
-
-        // Auto sign-in after successful registration
         const signInResult = await signIn("credentials", {
-          email: data.email,
-          password: data.password,
+          email: email.trim().toLowerCase(),
+          password,
           redirect: false,
         })
 
         if (signInResult?.ok) {
-          router.push(ROUTES.ONBOARDING_COMPANY)
-          router.refresh()
+          window.location.href = ROUTES.ONBOARDING_COMPANY
         } else {
-          // Account created but auto sign-in failed — go to sign-in page
-          router.push(`${ROUTES.SIGN_IN}?registered=true&email=${encodeURIComponent(data.email)}`)
+          router.push(`${ROUTES.SIGN_IN}?registered=true&email=${encodeURIComponent(email)}`)
         }
-      } catch (err) {
-        console.error("Sign up error:", err)
-        setServerError("Something went wrong. Please try again.")
+      } catch {
+        setError("Something went wrong. Please try again.")
       }
     })
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="space-y-2">
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">Create your account</h1>
+    <div className="space-y-6">
+      <div className="space-y-1">
+        <h1 className="text-2xl font-bold tracking-tight">Create your account</h1>
         <p className="text-sm text-muted-foreground">Start your 14-day free trial. No credit card required.</p>
       </div>
 
-      {serverError && (
-        <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
+      {error && (
+        <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
           <XCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
-          <p className="text-sm text-destructive">{serverError}</p>
+          <p className="text-sm text-destructive">{error}</p>
         </div>
       )}
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-1.5">
           <Label htmlFor="name">Full name</Label>
-          <Input
-            id="name"
-            type="text"
-            placeholder="Priya Sharma"
-            autoComplete="name"
-            autoFocus
-            className={cn(errors.name && "border-destructive")}
-            {...register("name")}
-          />
-          {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
+          <Input id="name" type="text" placeholder="Priya Sharma" autoFocus value={name} onChange={e => setName(e.target.value)} required minLength={2} />
         </div>
 
         <div className="space-y-1.5">
           <Label htmlFor="email">Work email</Label>
-          <Input
-            id="email"
-            type="email"
-            placeholder="priya@company.com"
-            autoComplete="email"
-            className={cn(errors.email && "border-destructive")}
-            {...register("email")}
-          />
-          {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
+          <Input id="email" type="email" placeholder="priya@company.com" value={email} onChange={e => setEmail(e.target.value)} required />
         </div>
 
         <div className="space-y-1.5">
           <Label htmlFor="password">Password</Label>
           <div className="relative">
-            <Input
-              id="password"
-              type={showPassword ? "text" : "password"}
-              placeholder="Create a strong password"
-              autoComplete="new-password"
-              className={cn("pr-10", errors.password && "border-destructive")}
-              {...register("password")}
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-              tabIndex={-1}
-            >
-              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            <Input id="password" type={showPwd ? "text" : "password"} placeholder="Create a strong password" className="pr-10" value={password} onChange={e => setPassword(e.target.value)} required />
+            <button type="button" onClick={() => setShowPwd(!showPwd)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" tabIndex={-1}>
+              {showPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>
           </div>
-
-          {watchedPassword.length > 0 && (
-            <div className="grid grid-cols-2 gap-1.5 pt-1">
-              {PASSWORD_RULES.map((rule) => {
-                const passes = rule.test(watchedPassword)
-                return (
-                  <div key={rule.label} className="flex items-center gap-1.5">
-                    {passes
-                      ? <CheckCircle2 className="h-3 w-3 text-success shrink-0" />
-                      : <XCircle className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-                    }
-                    <span className={cn("text-xs", passes ? "text-success" : "text-muted-foreground")}>
-                      {rule.label}
-                    </span>
-                  </div>
-                )
-              })}
+          {password.length > 0 && (
+            <div className="grid grid-cols-2 gap-1 pt-1">
+              {RULES.map(r => (
+                <div key={r.label} className="flex items-center gap-1.5">
+                  {r.test(password) ? <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0" /> : <XCircle className="h-3 w-3 text-muted-foreground/40 shrink-0" />}
+                  <span className={`text-xs ${r.test(password) ? "text-green-600" : "text-muted-foreground"}`}>{r.label}</span>
+                </div>
+              ))}
             </div>
           )}
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="confirmPassword">Confirm password</Label>
-          <Input
-            id="confirmPassword"
-            type={showPassword ? "text" : "password"}
-            placeholder="Repeat your password"
-            autoComplete="new-password"
-            className={cn(errors.confirmPassword && "border-destructive")}
-            {...register("confirmPassword")}
-          />
-          {errors.confirmPassword && (
-            <p className="text-xs text-destructive">{errors.confirmPassword.message}</p>
-          )}
+          <Label htmlFor="confirm">Confirm password</Label>
+          <Input id="confirm" type={showPwd ? "text" : "password"} placeholder="Repeat your password" value={confirm} onChange={e => setConfirm(e.target.value)} required />
         </div>
 
         <p className="text-xs text-muted-foreground">
-          By creating an account, you agree to our{" "}
-          <Link href={ROUTES.TERMS} className="text-primary hover:underline">Terms of Service</Link>
+          By signing up you agree to our{" "}
+          <Link href={ROUTES.TERMS} className="text-primary hover:underline">Terms</Link>
           {" "}and{" "}
           <Link href={ROUTES.PRIVACY} className="text-primary hover:underline">Privacy Policy</Link>.
         </p>
 
-        <Button type="submit" className="w-full" size="lg" loading={isPending}>
-          {!isPending && (<>Create account <ArrowRight className="h-4 w-4" /></>)}
-          {isPending && "Creating account…"}
+        <Button type="submit" className="w-full" size="lg" disabled={isPending}>
+          {isPending ? "Creating account…" : <><span>Create account</span><ArrowRight className="h-4 w-4" /></>}
         </Button>
       </form>
 
       <p className="text-center text-sm text-muted-foreground">
         Already have an account?{" "}
-        <Link href={ROUTES.SIGN_IN} className="font-medium text-primary hover:underline underline-offset-4">
-          Sign in
-        </Link>
+        <Link href={ROUTES.SIGN_IN} className="font-medium text-primary hover:underline">Sign in</Link>
       </p>
     </div>
   )
@@ -196,12 +127,7 @@ function SignUpForm() {
 
 export default function SignUpPage() {
   return (
-    <Suspense fallback={
-      <div className="space-y-2">
-        <h1 className="text-2xl font-bold tracking-tight">Create your account</h1>
-        <p className="text-sm text-muted-foreground">Loading…</p>
-      </div>
-    }>
+    <Suspense fallback={<div className="text-sm text-muted-foreground">Loading…</div>}>
       <SignUpForm />
     </Suspense>
   )

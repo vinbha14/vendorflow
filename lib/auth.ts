@@ -5,10 +5,9 @@ import bcrypt from "bcryptjs"
 import { prisma } from "@/lib/prisma"
 import { UserGlobalRole } from "@prisma/client"
 import type { NextAuthConfig } from "next-auth"
-import { loginSchema } from "@/types/auth"
 
 export const authConfig: NextAuthConfig = {
-  secret: process.env.AUTH_SECRET,
+  secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
   session: { strategy: "jwt", maxAge: 30 * 24 * 60 * 60 },
   pages: { signIn: "/auth/sign-in", error: "/auth/error" },
   providers: [
@@ -18,58 +17,58 @@ export const authConfig: NextAuthConfig = {
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        try {
-          const parsed = loginSchema.safeParse(credentials)
-          if (!parsed.success) return null
+        const email = (credentials?.email as string ?? "").toLowerCase().trim()
+        const password = credentials?.password as string ?? ""
 
-          const { email, password } = parsed.data
+        if (!email || !password) return null
+
+        try {
           const user = await prisma.user.findUnique({
-            where: { email: email.toLowerCase().trim() },
+            where: { email },
             select: {
-              id: true, email: true, name: true, image: true,
-              hashedPassword: true, globalRole: true, isActive: true,
+              id: true,
+              email: true,
+              name: true,
+              image: true,
+              hashedPassword: true,
+              globalRole: true,
+              isActive: true,
             },
           })
 
-          if (!user?.isActive || !user.hashedPassword) return null
+          if (!user || !user.isActive || !user.hashedPassword) return null
 
           const valid = await bcrypt.compare(password, user.hashedPassword)
           if (!valid) return null
 
-          prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } }).catch(() => {})
-
-          return { id: user.id, email: user.email, name: user.name, image: user.image, globalRole: user.globalRole }
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name ?? "",
+            image: user.image ?? "",
+            globalRole: user.globalRole,
+          }
         } catch (err) {
-          console.error("[Auth] authorize error:", err)
+          console.error("[Auth] DB error during authorize:", err)
           return null
         }
       },
     }),
   ],
   callbacks: {
-    async jwt({ token, user, trigger, session }) {
+    async jwt({ token, user }) {
       if (user) {
         token.id = user.id
-        token.email = user.email
-        token.name = user.name
-        token.globalRole = (user as any).globalRole ?? UserGlobalRole.USER
-      }
-      if (trigger === "update" && session?.globalRole) {
-        token.globalRole = session.globalRole
+        token.globalRole = (user as any).globalRole ?? "USER"
       }
       return token
     },
     async session({ session, token }) {
-      if (token && session.user) {
+      if (session.user) {
         session.user.id = token.id as string
-        session.user.email = token.email as string
-        session.user.name = token.name as string
         session.user.globalRole = token.globalRole as UserGlobalRole
       }
       return session
-    },
-    async signIn({ user }) {
-      return !!user.email
     },
   },
   trustHost: true,
@@ -117,10 +116,15 @@ export async function getCurrentUserVendorContext() {
       },
     },
   })
-  if (!vendorUser) throw new Error("FORBIDDEN: Not a vendor user")
+  if (!vendorUser) throw new Error("FORBIDDEN")
   return {
-    user: session.user, vendorUser, vendor: vendorUser.vendor,
+    user: session.user,
+    vendorUser,
+    vendor: vendorUser.vendor,
     vendorRole: vendorUser.role as "ADMIN" | "RECRUITER",
-    assignedCompanies: vendorUser.vendor.companyRelationships.map((vc) => ({ ...vc.company, vendorRelationship: vc })),
+    assignedCompanies: vendorUser.vendor.companyRelationships.map((vc) => ({
+      ...vc.company,
+      vendorRelationship: vc,
+    })),
   }
 }
