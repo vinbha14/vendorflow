@@ -25,8 +25,13 @@ export const authConfig: NextAuthConfig = {
       },
       async authorize(credentials) {
         try {
+          console.log("[Auth] authorize called with email:", credentials?.email)
+
           const parsed = loginSchema.safeParse(credentials);
-          if (!parsed.success) return null;
+          if (!parsed.success) {
+            console.log("[Auth] validation failed:", parsed.error.errors)
+            return null;
+          }
 
           const { email, password } = parsed.data;
 
@@ -40,14 +45,17 @@ export const authConfig: NextAuthConfig = {
               hashedPassword: true,
               globalRole: true,
               isActive: true,
-              emailVerified: true,
             },
           });
+
+          console.log("[Auth] user found:", !!user, "isActive:", user?.isActive, "hasPassword:", !!user?.hashedPassword)
 
           if (!user || !user.isActive) return null;
           if (!user.hashedPassword) return null;
 
           const passwordValid = await bcrypt.compare(password, user.hashedPassword);
+          console.log("[Auth] password valid:", passwordValid)
+
           if (!passwordValid) return null;
 
           prisma.user.update({
@@ -92,6 +100,7 @@ export const authConfig: NextAuthConfig = {
       return session;
     },
     async signIn({ user }) {
+      console.log("[Auth] signIn callback, user:", user?.email)
       if (!user.email) return false;
       return true;
     },
