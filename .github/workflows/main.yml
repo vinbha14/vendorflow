@@ -1,0 +1,55 @@
+name: Fix Auth
+on: workflow_dispatch
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply fixes
+        run: |
+          # Fix package.json - downgrade next-auth to v4
+          node -e "
+          const fs = require('fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json','utf8'));
+          pkg.dependencies['next-auth'] = '4.24.11';
+          delete pkg.dependencies['@auth/prisma-adapter'];
+          fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+          console.log('package.json updated');
+          "
+          
+          # Fix NextAuth route
+          mkdir -p "app/api/auth/[...nextauth]"
+          cat > "app/api/auth/[...nextauth]/route.ts" << 'EOF'
+          import NextAuth from "next-auth"
+          import { authOptions } from "@/lib/auth"
+          const handler = NextAuth(authOptions)
+          export { handler as GET, handler as POST }
+          EOF
+          
+          # Fix middleware
+          cat > middleware.ts << 'EOF'
+          import { withAuth } from "next-auth/middleware"
+          import { NextResponse } from "next/server"
+          export default withAuth(
+            function middleware(req) { return NextResponse.next() },
+            {
+              callbacks: {
+                authorized({ token, req }) {
+                  const { pathname } = req.nextUrl
+                  const isPublic = pathname === "/" || pathname.startsWith("/auth/") || pathname.startsWith("/api/auth/") || pathname.startsWith("/legal/") || pathname.startsWith("/portal/") || pathname.startsWith("/api/webhooks/") || pathname === "/pricing" || pathname === "/features" || pathname === "/about" || pathname === "/contact"
+                  if (isPublic) return true
+                  return !!token
+                }
+              },
+              pages: { signIn: "/auth/sign-in", error: "/auth/error" }
+            }
+          )
+          export const config = { matcher: ["/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|woff|woff2|ttf|otf|map)).*)"] }
+          EOF
+          
+          echo "Files updated"
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
+          git add -A
+          git commit -m "fix: downgrade next-auth to v4 stable" || echo "nothing to commit"
+          git push
