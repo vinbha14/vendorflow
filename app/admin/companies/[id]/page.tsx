@@ -284,10 +284,10 @@ export default async function AdminCompanyDetailPage({
                     <div key={key} className="flex flex-col items-center gap-1">
                       <div
                         className="h-8 w-8 rounded-full border"
-                        style={{ backgroundColor: (company.branding as Record<string, string>)[key] }}
+                        style={{ backgroundColor: (company.branding as unknown as Record<string, string>)[key] }}
                       />
                       <span className="text-[10px] text-muted-foreground font-mono">
-                        {(company.branding as Record<string, string>)[key]}
+                        {(company.branding as unknown as Record<string, string>)[key]}
                       </span>
                     </div>
                   ))}
