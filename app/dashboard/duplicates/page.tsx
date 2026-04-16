@@ -360,7 +360,7 @@ export default async function DuplicatesPage({
               icon={Clock}
               title="No review history yet"
               description="Reviewed alerts will appear here. Work through the open queue to build history."
-              size="md"
+              size="sm"
             />
           ) : (
             <Card>
