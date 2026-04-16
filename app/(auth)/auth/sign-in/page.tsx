@@ -20,49 +20,44 @@ function SignInForm() {
   const searchParams = useSearchParams()
   const callbackUrl = searchParams.get("callbackUrl") ?? ROUTES.DASHBOARD
   const urlError = searchParams.get("error")
+  const registered = searchParams.get("registered")
 
   const [showPassword, setShowPassword] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = useForm<LoginInput>({
+  const { register, handleSubmit, formState: { errors } } = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
   })
 
   const onSubmit = (data: LoginInput) => {
     setServerError(null)
     startTransition(async () => {
-      const result = await signIn("credentials", {
-        email: data.email,
-        password: data.password,
-        redirect: false,
-      })
+      try {
+        const result = await signIn("credentials", {
+          email: data.email,
+          password: data.password,
+          redirect: false,
+        })
 
-      if (result?.error) {
-        setServerError("Invalid email or password. Please try again.")
-        return
-      }
+        if (result?.error || !result?.ok) {
+          setServerError("Invalid email or password. Please try again.")
+          return
+        }
 
-      if (result?.ok) {
-        router.push(callbackUrl)
-        router.refresh()
+        // Use window.location for a hard redirect to avoid stale session state
+        window.location.href = callbackUrl === "/api/auth/error" ? ROUTES.DASHBOARD : callbackUrl
+      } catch (err) {
+        setServerError("Something went wrong. Please try again.")
       }
     })
   }
 
-  const errorMessage =
-    serverError ??
-    (urlError === "OAuthAccountNotLinked"
-      ? "This email is already registered with a different sign-in method."
-      : urlError === "SessionRequired"
-      ? "Please sign in to access this page."
-      : urlError
-      ? "Something went wrong. Please try again."
-      : null)
+  const errorMessage = serverError ?? (
+    urlError === "OAuthAccountNotLinked" ? "This email is already registered with a different method." :
+    urlError === "SessionRequired" ? "Please sign in to access this page." :
+    urlError && urlError !== "undefined" ? "Something went wrong. Please try again." : null
+  )
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -70,6 +65,12 @@ function SignInForm() {
         <h1 className="text-2xl font-bold tracking-tight text-foreground">Welcome back</h1>
         <p className="text-sm text-muted-foreground">Sign in to your VendorFlow workspace</p>
       </div>
+
+      {registered && (
+        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3">
+          <p className="text-sm text-green-700">Account created successfully. Sign in below.</p>
+        </div>
+      )}
 
       {errorMessage && (
         <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
@@ -82,12 +83,9 @@ function SignInForm() {
         <div className="space-y-1.5">
           <Label htmlFor="email">Email address</Label>
           <Input
-            id="email"
-            type="email"
-            placeholder="you@company.com"
-            autoComplete="email"
-            autoFocus
-            className={cn(errors.email && "border-destructive focus-visible:ring-destructive")}
+            id="email" type="email" placeholder="you@company.com"
+            autoComplete="email" autoFocus
+            className={cn(errors.email && "border-destructive")}
             {...register("email")}
           />
           {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
@@ -102,19 +100,14 @@ function SignInForm() {
           </div>
           <div className="relative">
             <Input
-              id="password"
-              type={showPassword ? "text" : "password"}
-              placeholder="••••••••"
-              autoComplete="current-password"
-              className={cn("pr-10", errors.password && "border-destructive focus-visible:ring-destructive")}
+              id="password" type={showPassword ? "text" : "password"}
+              placeholder="••••••••" autoComplete="current-password"
+              className={cn("pr-10", errors.password && "border-destructive")}
               {...register("password")}
             />
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-              tabIndex={-1}
-            >
+            <button type="button" onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              tabIndex={-1}>
               {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>
           </div>
@@ -126,24 +119,6 @@ function SignInForm() {
           {isPending && "Signing in…"}
         </Button>
       </form>
-
-      {process.env.NODE_ENV === "development" && (
-        <div className="rounded-lg border border-dashed border-border bg-muted/30 p-4 space-y-2">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Demo accounts</p>
-          {[
-            { label: "Company Admin", email: "priya@techcorpindia.com" },
-            { label: "Hiring Manager", email: "arjun@techcorpindia.com" },
-            { label: "Vendor Admin", email: "ravi@talentbridge.in" },
-            { label: "Super Admin", email: "admin@vendorflow.com" },
-          ].map((account) => (
-            <div key={account.email} className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">{account.label}</span>
-              <span className="text-xs font-mono text-foreground">{account.email}</span>
-            </div>
-          ))}
-          <p className="text-xs text-muted-foreground">Password: Demo@123456 / Vendor@123456 / Admin@123456</p>
-        </div>
-      )}
 
       <p className="text-center text-sm text-muted-foreground">
         Don&apos;t have an account?{" "}
@@ -158,11 +133,9 @@ function SignInForm() {
 export default function SignInPage() {
   return (
     <Suspense fallback={
-      <div className="space-y-6">
-        <div className="space-y-2">
-          <h1 className="text-2xl font-bold tracking-tight">Welcome back</h1>
-          <p className="text-sm text-muted-foreground">Sign in to your VendorFlow workspace</p>
-        </div>
+      <div className="space-y-2">
+        <h1 className="text-2xl font-bold tracking-tight">Welcome back</h1>
+        <p className="text-sm text-muted-foreground">Loading…</p>
       </div>
     }>
       <SignInForm />

@@ -1,40 +1,36 @@
 // middleware.ts
 import { NextResponse } from "next/server"
-import type { NextRequest } from "next/server"
 import { auth } from "@/lib/auth"
 
-export default auth(function middleware(req) {
-  const { nextUrl } = req
-  const pathname = nextUrl.pathname
-  const session = (req as any).auth
-  const isAuthenticated = !!session?.user
+const PUBLIC = [
+  "/", "/pricing", "/features", "/about", "/contact", "/demo", "/faq",
+]
 
-  // Always allow these through — no exceptions
+export default auth(function middleware(req: any) {
+  const pathname = req.nextUrl.pathname
+  const isAuthenticated = !!req.auth?.user
+
+  // Always pass through
   if (
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/_next") ||
-    pathname.startsWith("/auth") ||
-    pathname.startsWith("/legal") ||
-    pathname.startsWith("/portal") ||
+    pathname.startsWith("/auth/") ||
+    pathname.startsWith("/legal/") ||
+    pathname.startsWith("/portal/") ||
     pathname.startsWith("/api/webhooks") ||
-    pathname === "/" ||
-    pathname === "/pricing" ||
-    pathname === "/features" ||
-    pathname === "/about" ||
-    pathname === "/contact" ||
-    pathname.match(/\.(ico|png|jpg|jpeg|svg|css|js|woff|woff2|ttf|map)$/)
+    pathname.match(/\.(ico|png|jpg|jpeg|svg|css|js|woff|woff2|ttf|map)$/) ||
+    PUBLIC.includes(pathname)
   ) {
     return NextResponse.next()
   }
 
-  // Protected routes — require auth
+  // Require auth for everything else
   if (!isAuthenticated) {
-    const signInUrl = new URL("/auth/sign-in", req.url)
-    signInUrl.searchParams.set("callbackUrl", pathname)
-    return NextResponse.redirect(signInUrl)
+    const url = new URL("/auth/sign-in", req.url)
+    url.searchParams.set("callbackUrl", pathname)
+    return NextResponse.redirect(url)
   }
 
-  // Authenticated — let through
   return NextResponse.next()
 })
 

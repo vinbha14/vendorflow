@@ -13,15 +13,10 @@ export default async function DashboardLayout({
   children: React.ReactNode
 }) {
   const session = await auth()
-
   if (!session?.user) redirect(ROUTES.SIGN_IN)
+  if (session.user.globalRole === UserGlobalRole.SUPER_ADMIN) redirect(ROUTES.ADMIN)
 
-  if (session.user.globalRole === UserGlobalRole.SUPER_ADMIN) {
-    redirect(ROUTES.ADMIN)
-  }
-
-  // Find the user's company membership directly — no subdomain needed
-  let membership = null
+  let membership: any = null
   try {
     membership = await prisma.companyMember.findFirst({
       where: { userId: session.user.id, isActive: true },
@@ -35,7 +30,7 @@ export default async function DashboardLayout({
       },
     })
   } catch (err) {
-    console.error("[DashboardLayout] membership error:", err)
+    console.error("[DashboardLayout] DB error:", err)
     redirect(ROUTES.SIGN_IN)
   }
 
@@ -44,28 +39,21 @@ export default async function DashboardLayout({
   const { company } = membership
   const tenantId = company.id
 
-  // Fetch sidebar badge counts
   let notificationCount = 0
   let duplicateAlertCount = 0
   let pendingVendorCount = 0
 
   try {
-    const [notifs, dupes, pending] = await Promise.all([
-      prisma.notification.count({
-        where: { userId: session.user.id, isRead: false },
-      }),
-      prisma.duplicateAlert.count({
-        where: { companyId: tenantId, status: "OPEN" },
-      }),
-      prisma.vendorCompany.count({
-        where: { companyId: tenantId, status: "PENDING" },
-      }),
+    const [n, d, p] = await Promise.all([
+      prisma.notification.count({ where: { userId: session.user.id, isRead: false } }),
+      prisma.duplicateAlert.count({ where: { companyId: tenantId, status: "OPEN" } }),
+      prisma.vendorCompany.count({ where: { companyId: tenantId, status: "PENDING" } }),
     ])
-    notificationCount = notifs
-    duplicateAlertCount = dupes
-    pendingVendorCount = pending
+    notificationCount = n
+    duplicateAlertCount = d
+    pendingVendorCount = p
   } catch (err) {
-    console.error("[DashboardLayout] badge counts error:", err)
+    console.error("[DashboardLayout] counts error:", err)
   }
 
   return (
@@ -87,7 +75,6 @@ export default async function DashboardLayout({
         duplicateAlertCount={duplicateAlertCount}
         pendingVendorCount={pendingVendorCount}
       />
-
       <div className="flex flex-1 flex-col pl-64">
         <DashboardHeader notificationCount={notificationCount} />
         <main className="flex-1 overflow-auto">
